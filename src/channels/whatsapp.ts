@@ -63,6 +63,11 @@ export class WhatsAppChannel implements Channel {
       printQRInTerminal: false,
       logger,
       browser: Browsers.macOS('Chrome'),
+      // Prevent Baileys from caching all received messages in RAM for retries.
+      // Without this, message history accumulates indefinitely and causes OOM.
+      getMessage: async () => undefined,
+      // Don't pull full WhatsApp chat history on connect — only recent messages.
+      syncFullHistory: false,
     });
 
     this.sock.ev.on('connection.update', (update) => {

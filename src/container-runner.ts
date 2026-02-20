@@ -301,7 +301,7 @@ export async function runContainerAgent(
       }
 
       // Stream-parse for output markers
-      if (onOutput) {
+      if (onOutput && parseBuffer.length < CONTAINER_MAX_OUTPUT_SIZE) {
         parseBuffer += chunk;
         let startIdx: number;
         while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
