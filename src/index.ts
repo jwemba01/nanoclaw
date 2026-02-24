@@ -500,6 +500,14 @@ async function main(): Promise<void> {
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop();
+
+  // Scheduled restart every 20 hours to prevent Baileys' internal state from
+  // accumulating indefinitely. launchd restarts the process automatically.
+  const RESTART_INTERVAL_MS = 20 * 60 * 60 * 1000;
+  setTimeout(() => {
+    logger.info('Scheduled restart for memory management');
+    process.exit(0);
+  }, RESTART_INTERVAL_MS).unref();
 }
 
 // Guard: only run when executed directly, not when imported by tests

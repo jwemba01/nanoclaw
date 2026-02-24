@@ -32,6 +32,9 @@ export class WhatsAppChannel implements Channel {
 
   private sock!: WASocket;
   private connected = false;
+  private reconnecting = false;
+  private reconnectAttempts = 0;
+  private socketGeneration = 0;
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -50,6 +53,7 @@ export class WhatsAppChannel implements Channel {
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
+    const myGeneration = ++this.socketGeneration;
     const authDir = path.join(STORE_DIR, 'auth');
     fs.mkdirSync(authDir, { recursive: true });
 
@@ -71,6 +75,9 @@ export class WhatsAppChannel implements Channel {
     });
 
     this.sock.ev.on('connection.update', (update) => {
+      // Ignore events from superseded sockets
+      if (this.socketGeneration !== myGeneration) return;
+
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -90,21 +97,30 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          if (this.reconnecting) {
+            logger.debug('Reconnect already in progress, skipping duplicate');
+            return;
+          }
+          this.reconnecting = true;
+          this.reconnectAttempts++;
+          // Exponential backoff: 2^attempt seconds, capped at 5 minutes
+          const baseDelay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 5 * 60 * 1000);
+          const jitter = Math.random() * 1000;
+          const delay = Math.round(baseDelay + jitter);
+          logger.info({ delay, attempt: this.reconnectAttempts }, 'Reconnecting...');
+          setTimeout(() => {
+            this.reconnecting = false;
+            this.connectInternal(onFirstOpen).catch((err) => {
+              logger.error({ err }, 'Reconnect failed');
+            });
+          }, delay);
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempts = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
